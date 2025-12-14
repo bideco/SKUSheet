@@ -36,6 +36,13 @@ function onOpen() {
     const sheet = ss.getSheetByName("Sheet1");
     if (!sheet) return;
 
+    // Ensure we have enough columns for controls + barcode area
+    const requiredCols = 30;
+    const existingCols = sheet.getMaxColumns();
+    if (existingCols < requiredCols) {
+      sheet.insertColumnsAfter(existingCols, requiredCols - existingCols);
+    }
+
     // Compact A column (checkbox-sized)
     sheet.setColumnWidth(1, 48);
 
@@ -57,8 +64,44 @@ function onOpen() {
 
     SpreadsheetApp.getActive().toast("Barcode Tools ready", "Ready", 3);
   } catch (err) {
-    Logger.log("onOpen error: " + err);
+    reportError_("onOpen", err);
   }
+}
+
+// Build the A-column checkbox controls and labels
+function setupAColumnControls_(sheet) {
+  const controls = [
+    "Process Queue",
+    "Queue Items",
+    "Force Refresh",
+    "Reset Page",
+    "Print Layout",
+    "Settings",
+    "Help"
+  ];
+
+  const checkboxValidation = SpreadsheetApp.newDataValidation()
+    .requireCheckbox()
+    .build();
+
+  controls.forEach((label, idx) => {
+    const row = idx + 2; // Rows A2–A8
+    const checkboxCell = sheet.getRange(row, 1);
+    const labelCell = sheet.getRange(row, 2);
+
+    checkboxCell
+      .setDataValidation(checkboxValidation)
+      .setValue(false)
+      .setBackground(PANEL_BG)
+      .setHorizontalAlignment("center")
+      .setVerticalAlignment("middle");
+
+    labelCell
+      .setValue(label)
+      .setBackground(PANEL_BG)
+      .setFontWeight("bold")
+      .setVerticalAlignment("middle");
+  });
 }
 
 function onEdit(e) {
@@ -81,7 +124,7 @@ function onEdit(e) {
       handleCheckbox_(row);
     }
   } catch (err) {
-    Logger.log("onEdit error: " + err);
+    reportError_("onEdit", err);
   }
 }
 
@@ -298,24 +341,29 @@ function getProductData_(ean) {
   const apiKey = SCRIPT_PROPS.getProperty("SERPAPI_KEY");
   if (!apiKey) return { info: "SKU: " + ean, imageUrl: null };
 
-  const url =
-    "https://serpapi.com/search.json?engine=amazon&amazon_domain=amazon.com&k=" +
-    encodeURIComponent(ean) +
-    "&api_key=" +
-    apiKey;
+  try {
+    const url =
+      "https://serpapi.com/search.json?engine=amazon&amazon_domain=amazon.com&k=" +
+      encodeURIComponent(ean) +
+      "&api_key=" +
+      apiKey;
 
-  const res = UrlFetchApp.fetch(url);
-  const json = JSON.parse(res.getContentText());
-  const item = json.organic_results?.[0];
+    const res = UrlFetchApp.fetch(url);
+    const json = JSON.parse(res.getContentText());
+    const item = json.organic_results?.[0];
 
-  const data = {
-    info: item?.title || "SKU: " + ean,
-    imageUrl: item?.thumbnail || null
-  };
+    const data = {
+      info: item?.title || "SKU: " + ean,
+      imageUrl: item?.thumbnail || null
+    };
 
-  CACHE.put(cacheKey, JSON.stringify(data), 21600);
-  SCRIPT_PROPS.deleteProperty("FORCE_REFRESH");
-  return data;
+    CACHE.put(cacheKey, JSON.stringify(data), 21600);
+    SCRIPT_PROPS.deleteProperty("FORCE_REFRESH");
+    return data;
+  } catch (err) {
+    Logger.log("SerpAPI fetch failed for " + ean + ": " + err);
+    return { info: "SKU: " + ean, imageUrl: null };
+  }
 }
 
 /***********************
@@ -387,6 +435,27 @@ function cleanupPanelIfPresent_(sheet) {
     sheet.getRange(1, 1, 40, 10).clearContent().clearFormat();
     sheet.deleteRows(1, 40);
     sheet.getRange("A1").setNote("");
+  }
+}
+
+/***********************
+ * ERROR REPORTING
+ ***********************/
+function reportError_(context, err) {
+  const message = `${context} error: ${err}`;
+  Logger.log(message);
+
+  const ui = SpreadsheetApp.getActive();
+  try {
+    ui.toast(message, "Error", 8);
+  } catch (toastErr) {
+    Logger.log("toast failed: " + toastErr);
+  }
+
+  try {
+    setStatus_("Error", STATUS_COLORS.ERROR);
+  } catch (statusErr) {
+    Logger.log("status update failed: " + statusErr);
   }
 }
 
