@@ -61,6 +61,42 @@ function onOpen() {
   }
 }
 
+// Build the A-column checkbox controls and labels
+function setupAColumnControls_(sheet) {
+  const controls = [
+    "Process Queue",
+    "Queue Items",
+    "Force Refresh",
+    "Reset Page",
+    "Print Layout",
+    "Settings",
+    "Help"
+  ];
+
+  const checkboxValidation = SpreadsheetApp.newDataValidation()
+    .requireCheckbox()
+    .build();
+
+  controls.forEach((label, idx) => {
+    const row = idx + 2; // Rows A2–A8
+    const checkboxCell = sheet.getRange(row, 1);
+    const labelCell = sheet.getRange(row, 2);
+
+    checkboxCell
+      .setDataValidation(checkboxValidation)
+      .setValue(false)
+      .setBackground(PANEL_BG)
+      .setHorizontalAlignment("center")
+      .setVerticalAlignment("middle");
+
+    labelCell
+      .setValue(label)
+      .setBackground(PANEL_BG)
+      .setFontWeight("bold")
+      .setVerticalAlignment("middle");
+  });
+}
+
 function onEdit(e) {
   try {
     if (!e || !e.range) return;
@@ -298,24 +334,29 @@ function getProductData_(ean) {
   const apiKey = SCRIPT_PROPS.getProperty("SERPAPI_KEY");
   if (!apiKey) return { info: "SKU: " + ean, imageUrl: null };
 
-  const url =
-    "https://serpapi.com/search.json?engine=amazon&amazon_domain=amazon.com&k=" +
-    encodeURIComponent(ean) +
-    "&api_key=" +
-    apiKey;
+  try {
+    const url =
+      "https://serpapi.com/search.json?engine=amazon&amazon_domain=amazon.com&k=" +
+      encodeURIComponent(ean) +
+      "&api_key=" +
+      apiKey;
 
-  const res = UrlFetchApp.fetch(url);
-  const json = JSON.parse(res.getContentText());
-  const item = json.organic_results?.[0];
+    const res = UrlFetchApp.fetch(url);
+    const json = JSON.parse(res.getContentText());
+    const item = json.organic_results?.[0];
 
-  const data = {
-    info: item?.title || "SKU: " + ean,
-    imageUrl: item?.thumbnail || null
-  };
+    const data = {
+      info: item?.title || "SKU: " + ean,
+      imageUrl: item?.thumbnail || null
+    };
 
-  CACHE.put(cacheKey, JSON.stringify(data), 21600);
-  SCRIPT_PROPS.deleteProperty("FORCE_REFRESH");
-  return data;
+    CACHE.put(cacheKey, JSON.stringify(data), 21600);
+    SCRIPT_PROPS.deleteProperty("FORCE_REFRESH");
+    return data;
+  } catch (err) {
+    Logger.log("SerpAPI fetch failed for " + ean + ": " + err);
+    return { info: "SKU: " + ean, imageUrl: null };
+  }
 }
 
 /***********************
